@@ -35,6 +35,7 @@ jobs:
 
     env:
       DATABASE_URL: postgresql://acmepay:acmepay@localhost:5432/acmepay?schema=public
+      TEST_DATABASE_URL: postgresql://acmepay:acmepay@localhost:5432/acmepay_test?schema=public
       REDIS_HOST: localhost
       REDIS_PORT: 6379
       WEBHOOK_SECRET: dev-webhook-secret
@@ -59,5 +60,11 @@ jobs:
       - run: npm run lint
 
       - run: npm test
+
+      # The integration suite truncates every table, so it gets its own database.
+      - name: Create integration database
+        run: psql "$DATABASE_URL" -c 'CREATE DATABASE acmepay_test'
+
+      - run: npm run test:int
 
       - run: npm run build

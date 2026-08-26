@@ -52,52 +52,59 @@ export class PayoutsService {
   }
 
   async process(payoutId: string): Promise<void> {
-    await this.prisma.$transaction(async (tx) => {
-      const payout = await tx.payout.findUnique({ where: { id: payoutId } });
+    await this.prisma.$transaction(
+      async (tx) => {
+        const payout = await tx.payout.findUnique({ where: { id: payoutId } });
 
-      if (!payout || payout.status !== 'QUEUED') {
-        return;
-      }
-
-      await tx.payout.update({
-        where: { id: payoutId },
-        data: { status: PayoutStatus.PROCESSING },
-      });
-
-      try {
-        await this.balances.debit(
-          payout.partnerId,
-          payout.currency,
-          payout.amount,
-          'payout',
-          payout.id,
-          'Payout debit on confirm',
-        );
+        if (!payout || payout.status !== 'QUEUED') {
+          return;
+        }
 
         await tx.payout.update({
           where: { id: payoutId },
-          data: {
-            status: PayoutStatus.COMPLETED,
-            completedAt: new Date(),
-            failureCode: null,
-            failureMessage: null,
-          },
+          data: { status: PayoutStatus.PROCESSING },
         });
-      } catch (error) {
-        if (error instanceof DomainException) {
+
+        try {
+          await this.balances.debit(
+            tx,
+            payout.partnerId,
+            payout.currency,
+            payout.amount,
+            'payout',
+            payout.id,
+            'Payout debit on confirm',
+          );
+
           await tx.payout.update({
             where: { id: payoutId },
             data: {
-              status: PayoutStatus.FAILED,
-              failureCode: String(error.errorCode),
-              failureMessage: error.message,
+              status: PayoutStatus.COMPLETED,
+              completedAt: new Date(),
+              failureCode: null,
+              failureMessage: null,
             },
           });
-          return;
+        } catch (error) {
+          // An insufficient balance is a business outcome, not a database
+          // error: the transaction is still usable, so the payout can be
+          // recorded as failed in the same commit that left funds untouched.
+          if (error instanceof DomainException) {
+            await tx.payout.update({
+              where: { id: payoutId },
+              data: {
+                status: PayoutStatus.FAILED,
+                failureCode: String(error.errorCode),
+                failureMessage: error.message,
+              },
+            });
+            return;
+          }
+          throw error;
         }
-        throw error;
-      }
-    });
+      },
+      { maxWait: 5_000, timeout: 15_000 },
+    );
   }
 
   toResponse(payout: Payout): PayoutResponse {

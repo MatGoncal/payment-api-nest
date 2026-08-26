@@ -95,6 +95,7 @@ model BalanceLedger {
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
 
+  @@unique([referenceType, referenceId, direction], map: "balance_ledger_reference_unique")
   @@index([partnerId, currency, createdAt])
   @@map("balance_ledger")
 }

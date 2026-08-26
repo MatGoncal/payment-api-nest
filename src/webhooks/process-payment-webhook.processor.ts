@@ -1,6 +1,7 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
+import { Payment, Prisma } from '@prisma/client';
 import { PaymentStatus } from '../common/enums';
 import { DomainException } from '../common/exceptions/domain.exception';
 import { BalancesService } from '../balances/balances.service';
@@ -21,45 +22,48 @@ export class ProcessPaymentWebhookProcessor extends WorkerHost {
   }
 
   async process(job: Job<{ webhookEventId: string }>): Promise<void> {
-    await this.prisma.$transaction(async (tx) => {
-      const event = await tx.webhookEvent.findUnique({
-        where: { id: job.data.webhookEventId },
-      });
+    await this.prisma.$transaction(
+      async (tx) => {
+        const event = await tx.webhookEvent.findUnique({
+          where: { id: job.data.webhookEventId },
+        });
 
-      if (!event || event.processedAt) {
-        return;
-      }
-
-      const payment = event.paymentId
-        ? await tx.payment.findUnique({ where: { id: event.paymentId } })
-        : null;
-
-      if (payment) {
-        switch (event.type) {
-          case 'payment.paid':
-            await this.markPaid(tx, payment, event.payload);
-            break;
-          case 'payment.expired':
-            await this.markStatus(tx, payment.id, PaymentStatus.EXPIRED);
-            break;
-          case 'payment.failed':
-            await this.markStatus(tx, payment.id, PaymentStatus.FAILED);
-            break;
+        if (!event || event.processedAt) {
+          return;
         }
-      }
 
-      await tx.webhookEvent.update({
-        where: { id: event.id },
-        data: { processedAt: new Date() },
-      });
-    });
+        const payment = event.paymentId
+          ? await tx.payment.findUnique({ where: { id: event.paymentId } })
+          : null;
+
+        if (payment) {
+          switch (event.type) {
+            case 'payment.paid':
+              await this.markPaid(tx, payment, event.payload);
+              break;
+            case 'payment.expired':
+              await this.markStatus(tx, payment.id, PaymentStatus.EXPIRED);
+              break;
+            case 'payment.failed':
+              await this.markStatus(tx, payment.id, PaymentStatus.FAILED);
+              break;
+          }
+        }
+
+        await tx.webhookEvent.update({
+          where: { id: event.id },
+          data: { processedAt: new Date() },
+        });
+      },
+      // Settling a payment credits a balance and writes a ledger entry while
+      // holding row locks; the 5s Prisma default is too tight under contention.
+      { maxWait: 5_000, timeout: 15_000 },
+    );
   }
 
   private async markPaid(
-    tx: Parameters<Parameters<PrismaService['$transaction']>[0]>[0],
-    payment: NonNullable<
-      Awaited<ReturnType<PrismaService['payment']['findUnique']>>
-    >,
+    tx: Prisma.TransactionClient,
+    payment: Payment,
     payload: unknown,
   ) {
     if (payment.status === 'PAID') {
@@ -98,11 +102,11 @@ export class ProcessPaymentWebhookProcessor extends WorkerHost {
       },
     });
 
-    await this.balances.creditPayment(updated);
+    await this.balances.creditPayment(tx, updated);
   }
 
   private async markStatus(
-    tx: Parameters<Parameters<PrismaService['$transaction']>[0]>[0],
+    tx: Prisma.TransactionClient,
     paymentId: string,
     status: PaymentStatus,
   ) {
