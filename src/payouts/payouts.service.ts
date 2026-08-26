@@ -12,6 +12,15 @@ import { CreatePayoutDto } from './dto/create-payout.dto';
 
 export const PROCESS_PAYOUT_QUEUE = 'process-payout';
 
+/**
+ * BullMQ deduplicates on job id, so a retried create request or a redelivered
+ * enqueue collapses into the one job that already exists for this payout.
+ * Custom ids may not contain `:`, which BullMQ reserves for its own keys.
+ */
+export function payoutJobId(payoutId: string): string {
+  return `payout-${payoutId}`;
+}
+
 export type PayoutResponse = {
   id: string;
   status: string;
@@ -46,7 +55,11 @@ export class PayoutsService {
       },
     });
 
-    await this.payoutQueue.add('process', { payoutId: payout.id });
+    await this.payoutQueue.add(
+      'process',
+      { payoutId: payout.id },
+      { jobId: payoutJobId(payout.id) },
+    );
 
     return this.toResponse(payout);
   }

@@ -3,6 +3,7 @@ import { Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
 import { Payment, Prisma } from '@prisma/client';
 import { PaymentStatus } from '../common/enums';
+import { PaymentStateMachine } from '../common/payment-state-machine';
 import { DomainException } from '../common/exceptions/domain.exception';
 import { BalancesService } from '../balances/balances.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -66,7 +67,16 @@ export class ProcessPaymentWebhookProcessor extends WorkerHost {
     payment: Payment,
     payload: unknown,
   ) {
-    if (payment.status === 'PAID') {
+    if (
+      !PaymentStateMachine.canTransition(payment.status, PaymentStatus.PAID)
+    ) {
+      this.logger.warn(
+        `Ignored payment.paid for closed payment ${payment.id} (${payment.status})`,
+      );
+      return;
+    }
+
+    if (!this.payloadMatchesPayment(payment, payload)) {
       return;
     }
 
@@ -84,11 +94,7 @@ export class ProcessPaymentWebhookProcessor extends WorkerHost {
       throw error;
     }
 
-    const data =
-      typeof payload === 'object' && payload !== null
-        ? (payload as { data?: { provider_tx_id?: string } }).data
-        : undefined;
-    const providerTxId = data?.provider_tx_id;
+    const providerTxId = settlementData(payload).provider_tx_id;
 
     const updated = await tx.payment.update({
       where: { id: payment.id },
@@ -111,7 +117,11 @@ export class ProcessPaymentWebhookProcessor extends WorkerHost {
     status: PaymentStatus,
   ) {
     const payment = await tx.payment.findUnique({ where: { id: paymentId } });
-    if (!payment || payment.status === 'PAID') {
+
+    if (
+      !payment ||
+      !PaymentStateMachine.canTransition(payment.status, status)
+    ) {
       return;
     }
 
@@ -120,4 +130,47 @@ export class ProcessPaymentWebhookProcessor extends WorkerHost {
       data: { status },
     });
   }
+
+  /**
+   * The provider tells us what it settled; we only credit what we charged. A
+   * divergence is a reconciliation problem, so the payment stays open for a
+   * corrected event instead of being credited or closed on a wrong figure.
+   */
+  private payloadMatchesPayment(payment: Payment, payload: unknown): boolean {
+    const data = settlementData(payload);
+    const amount =
+      typeof data.amount === 'number' ? BigInt(data.amount) : undefined;
+    const currency =
+      typeof data.currency === 'string'
+        ? data.currency.toUpperCase()
+        : undefined;
+
+    if (amount === payment.amount && currency === payment.currency) {
+      return true;
+    }
+
+    this.logger.warn(
+      `Settlement rejected for payment ${payment.id}: expected ` +
+        `${payment.amount} ${payment.currency}, webhook reported ` +
+        `${amount ?? 'none'} ${currency ?? 'none'} (1015)`,
+    );
+
+    return false;
+  }
+}
+
+type SettlementData = {
+  provider_tx_id?: string;
+  amount?: number;
+  currency?: string;
+};
+
+function settlementData(payload: unknown): SettlementData {
+  if (typeof payload !== 'object' || payload === null) {
+    return {};
+  }
+
+  const data = (payload as { data?: unknown }).data;
+
+  return typeof data === 'object' && data !== null ? data : {};
 }

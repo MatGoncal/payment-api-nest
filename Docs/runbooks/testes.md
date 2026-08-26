@@ -34,12 +34,19 @@ depend on. `test/integration/**/*.int-spec.ts` runs against a throwaway
 database, migrating once per run and truncating every table between tests:
 
 ```bash
-docker compose --profile test up -d postgres-test
-TEST_DATABASE_URL=postgresql://acmepay:acmepay@localhost:5434/acmepay_test?schema=public npm run test:int
+docker compose --profile test up -d postgres-test redis
+TEST_DATABASE_URL=postgresql://acmepay:acmepay@localhost:5434/acmepay_test?schema=public \
+  REDIS_PORT=6380 npm run test:int
 ```
 
 Point `TEST_DATABASE_URL` at a database you are willing to lose. It defaults to
 `DATABASE_URL`, which for local work is the dev database.
+
+`queue-resilience.int-spec.ts` also needs Redis, because BullMQ's retry policy
+and job-id deduplication only exist in Redis — a mocked queue would happily
+accept a config that BullMQ rejects. It reads `REDIS_HOST`/`REDIS_PORT` and
+defaults to `localhost:6379`; the local compose stack publishes Redis on
+**6380**.
 
 ## Tear down
 
