@@ -1,0 +1,18 @@
+---
+description: AcmePay payment-api-nest NestJS conventions
+globs:
+  - "**/*.ts"
+alwaysApply: true
+---
+
+# payment-api-nest rules
+
+- Domain: AcmePay (fictional). Never import StarsPay code or real PSP credentials.
+- Money: integer minor units only. Prisma BigInt in DB; JSON as integers. No float for amounts.
+- FX `rate` is a decimal string, never a float.
+- Shared contract: `Docs/specs/API_CONTRACT.md`, codes in `Docs/specs/error-codes.md`.
+- Routes must match `/v1/*` exactly (`@Controller('v1/...')`).
+- New payment features: follow `.cursor/skills/nest-payment-module/SKILL.md`.
+- Spec first, then Jest test, then implementation, then update spec checkboxes.
+- Prefer class-validator DTOs, Guards for auth, BullMQ processors for async side effects.
+- Error envelope: `{ error: { code, name, message, details } }`.

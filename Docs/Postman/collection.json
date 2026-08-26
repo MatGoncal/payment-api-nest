@@ -1,0 +1,91 @@
+{
+  "info": {
+    "name": "AcmePay payment-api-nest",
+    "description": "Canonical AcmePay v1 collection — NestJS implementation",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3001/v1" },
+    { "key": "apiKey", "value": "demo-partner-key" },
+    { "key": "webhookSecret", "value": "dev-webhook-secret" },
+    { "key": "paymentId", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Create payment",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{apiKey}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"amount\": 1500,\n  \"currency\": \"BRL\",\n  \"external_id\": \"order-123\",\n  \"description\": \"Demo charge\"\n}"
+        },
+        "url": "{{baseUrl}}/payments"
+      }
+    },
+    {
+      "name": "Get payment",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{apiKey}}" }],
+        "url": "{{baseUrl}}/payments/{{paymentId}}"
+      }
+    },
+    {
+      "name": "Get balances",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{apiKey}}" }],
+        "url": "{{baseUrl}}/balances"
+      }
+    },
+    {
+      "name": "Create FX quote",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{apiKey}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"source_currency\": \"BRL\",\n  \"target_currency\": \"USD\",\n  \"amount\": 10000\n}"
+        },
+        "url": "{{baseUrl}}/fx/quotes"
+      }
+    },
+    {
+      "name": "Create payout",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{apiKey}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"amount\": 2500,\n  \"currency\": \"BRL\",\n  \"destination\": { \"type\": \"pix_key\", \"value\": \"synthetic@acme.test\" },\n  \"external_id\": \"payout-77\"\n}"
+        },
+        "url": "{{baseUrl}}/payouts"
+      }
+    },
+    {
+      "name": "Define payment splits",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{apiKey}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"splits\": [\n    { \"party\": \"platform\", \"amount\": 150 },\n    { \"party\": \"seller\", \"amount\": 1200 },\n    { \"party\": \"affiliate\", \"amount\": 150 }\n  ]\n}"
+        },
+        "url": "{{baseUrl}}/payments/{{paymentId}}/splits"
+      }
+    }
+  ]
+}

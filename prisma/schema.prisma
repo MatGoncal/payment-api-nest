@@ -1,0 +1,155 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Partner {
+  id             String   @id @default(uuid()) @db.Uuid
+  name           String
+  apiKeyHash     String   @unique @map("api_key_hash")
+  apiKeyPrefix   String   @map("api_key_prefix") @db.VarChar(16)
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  payments        Payment[]
+  partnerBalances PartnerBalance[]
+  fxQuotes        FxQuote[]
+  payouts         Payout[]
+
+  @@map("partners")
+}
+
+model Payment {
+  id           String    @id @default(uuid()) @db.Uuid
+  partnerId    String    @map("partner_id") @db.Uuid
+  status       String    @db.VarChar(32)
+  amount       BigInt
+  currency     String    @db.VarChar(3)
+  externalId   String?   @map("external_id")
+  description  String?   @db.VarChar(140)
+  qrCode       String    @map("qr_code")
+  copyPaste    String    @map("copy_paste")
+  provider     String    @db.VarChar(64)
+  providerTxId String?   @map("provider_tx_id")
+  expiresAt    DateTime  @map("expires_at") @db.Timestamptz
+  paidAt       DateTime? @map("paid_at") @db.Timestamptz
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  partner       Partner        @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  webhookEvents WebhookEvent[]
+  splits        PaymentSplit[]
+
+  @@unique([partnerId, externalId])
+  @@index([partnerId, status])
+  @@map("payments")
+}
+
+model WebhookEvent {
+  id          String    @id @default(uuid()) @db.Uuid
+  provider    String    @db.VarChar(64)
+  eventId     String    @map("event_id")
+  type        String    @db.VarChar(64)
+  payload     Json
+  paymentId   String?   @map("payment_id") @db.Uuid
+  processedAt DateTime? @map("processed_at") @db.Timestamptz
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  payment Payment? @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+
+  @@unique([provider, eventId])
+  @@map("webhook_events")
+}
+
+model PartnerBalance {
+  id        String   @id @default(uuid()) @db.Uuid
+  partnerId String   @map("partner_id") @db.Uuid
+  currency  String   @db.VarChar(3)
+  available BigInt   @default(0)
+  pending   BigInt   @default(0)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  partner Partner @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  @@unique([partnerId, currency])
+  @@map("partner_balances")
+}
+
+model BalanceLedger {
+  id            String   @id @default(uuid()) @db.Uuid
+  partnerId     String   @map("partner_id") @db.Uuid
+  currency      String   @db.VarChar(3)
+  direction     String   @db.VarChar(16)
+  amount        BigInt
+  balanceAfter  BigInt   @map("balance_after")
+  referenceType String   @map("reference_type") @db.VarChar(64)
+  referenceId   String   @map("reference_id") @db.Uuid
+  description   String?
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@index([partnerId, currency, createdAt])
+  @@map("balance_ledger")
+}
+
+model FxQuote {
+  id             String    @id @default(uuid()) @db.Uuid
+  partnerId      String    @map("partner_id") @db.Uuid
+  sourceCurrency String    @map("source_currency") @db.VarChar(3)
+  targetCurrency String    @map("target_currency") @db.VarChar(3)
+  sourceAmount   BigInt    @map("source_amount")
+  targetAmount   BigInt    @map("target_amount")
+  rate           String    @db.VarChar(32)
+  expiresAt      DateTime  @map("expires_at") @db.Timestamptz
+  consumedAt     DateTime? @map("consumed_at") @db.Timestamptz
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  partner Partner @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  @@index([partnerId, expiresAt])
+  @@map("fx_quotes")
+}
+
+model Payout {
+  id               String    @id @default(uuid()) @db.Uuid
+  partnerId        String    @map("partner_id") @db.Uuid
+  status           String    @db.VarChar(32)
+  amount           BigInt
+  currency         String    @db.VarChar(3)
+  destinationType  String    @map("destination_type") @db.VarChar(32)
+  destinationValue String    @map("destination_value")
+  externalId       String?   @map("external_id")
+  failureCode      String?   @map("failure_code")
+  failureMessage   String?   @map("failure_message")
+  completedAt      DateTime? @map("completed_at") @db.Timestamptz
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  partner Partner @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  @@unique([partnerId, externalId])
+  @@index([partnerId, status])
+  @@map("payouts")
+}
+
+model PaymentSplit {
+  id        String   @id @default(uuid()) @db.Uuid
+  paymentId String   @map("payment_id") @db.Uuid
+  party     String   @db.VarChar(32)
+  amount    BigInt
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+
+  @@unique([paymentId, party])
+  @@map("payment_splits")
+}
