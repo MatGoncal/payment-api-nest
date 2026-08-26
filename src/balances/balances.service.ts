@@ -1,11 +1,17 @@
 import { Injectable } from '@nestjs/common';
-import { Partner, Payment } from '@prisma/client';
+import { Partner, PartnerBalance, Payment, Prisma } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { DomainException } from '../common/exceptions/domain.exception';
 import { LedgerDirection } from '../common/enums';
 import { toMinorUnits } from '../common/utils/money.util';
 import { PrismaService } from '../prisma/prisma.service';
 
+/**
+ * Every write here takes the caller's transaction client. Opening a nested
+ * `$transaction` would commit the ledger entry independently of the payment or
+ * payout that justifies it, so callers own the boundary and this service never
+ * starts one of its own.
+ */
 @Injectable()
 export class BalancesService {
   constructor(private readonly prisma: PrismaService) {}
@@ -25,57 +31,57 @@ export class BalancesService {
     };
   }
 
-  async creditPayment(payment: Payment): Promise<void> {
-    await this.prisma.$transaction(async (tx) => {
-      const exists = await tx.balanceLedger.findFirst({
-        where: {
-          referenceType: 'payment',
-          referenceId: payment.id,
-          direction: LedgerDirection.CREDIT,
-        },
-      });
-
-      if (exists) {
-        return;
-      }
-
-      await this.apply(
-        tx,
-        payment.partnerId,
-        payment.currency,
-        LedgerDirection.CREDIT,
-        payment.amount,
-        'payment',
-        payment.id,
-        'Settlement credit',
-      );
-    });
+  async creditPayment(
+    tx: Prisma.TransactionClient,
+    payment: Payment,
+  ): Promise<void> {
+    await this.apply(
+      tx,
+      payment.partnerId,
+      payment.currency,
+      LedgerDirection.CREDIT,
+      payment.amount,
+      'payment',
+      payment.id,
+      'Settlement credit',
+    );
   }
 
   async debit(
+    tx: Prisma.TransactionClient,
     partnerId: string,
     currency: string,
     amount: bigint,
     referenceType: string,
     referenceId: string,
     description: string,
-  ) {
-    return this.prisma.$transaction(async (tx) =>
-      this.apply(
-        tx,
-        partnerId,
-        currency,
-        LedgerDirection.DEBIT,
-        amount,
-        referenceType,
-        referenceId,
-        description,
-      ),
+  ): Promise<PartnerBalance> {
+    const balance = await this.apply(
+      tx,
+      partnerId,
+      currency,
+      LedgerDirection.DEBIT,
+      amount,
+      referenceType,
+      referenceId,
+      description,
+    );
+
+    // A null result means this reference was already debited by an earlier
+    // attempt of the same job, so the money moved once and this is a no-op.
+    return (
+      balance ??
+      tx.partnerBalance.findFirstOrThrow({ where: { partnerId, currency } })
     );
   }
 
+  /**
+   * Returns null when the reference had already been applied.
+   *
+   * @throws DomainException on a non-positive amount or an overdraft.
+   */
   private async apply(
-    tx: Parameters<Parameters<PrismaService['$transaction']>[0]>[0],
+    tx: Prisma.TransactionClient,
     partnerId: string,
     currency: string,
     direction: LedgerDirection,
@@ -83,7 +89,7 @@ export class BalancesService {
     referenceType: string,
     referenceId: string,
     description: string,
-  ) {
+  ): Promise<PartnerBalance | null> {
     if (amount <= 0n) {
       throw new DomainException(
         1015,
@@ -93,59 +99,93 @@ export class BalancesService {
       );
     }
 
-    let balance = await tx.partnerBalance.findFirst({
-      where: { partnerId, currency },
-    });
+    await this.ensureBalanceRow(tx, partnerId, currency);
 
-    if (!balance) {
-      balance = await tx.partnerBalance.create({
-        data: {
-          id: randomUUID(),
-          partnerId,
-          currency,
-          available: 0n,
-          pending: 0n,
-        },
-      });
+    // Claim the reference before touching money. The unique index is what makes
+    // a replayed settlement a no-op rather than a second movement, and claiming
+    // first means the duplicate path never has to undo anything.
+    const ledgerId = randomUUID();
+
+    const claimed = await tx.$executeRaw`
+      INSERT INTO "balance_ledger" (
+        "id", "partner_id", "currency", "direction", "amount", "balance_after",
+        "reference_type", "reference_id", "description", "created_at", "updated_at"
+      )
+      VALUES (
+        ${ledgerId}::uuid, ${partnerId}::uuid, ${currency}, ${direction}, ${amount}, 0,
+        ${referenceType}, ${referenceId}::uuid, ${description}, NOW(), NOW()
+      )
+      ON CONFLICT ("reference_type", "reference_id", "direction") DO NOTHING
+    `;
+
+    if (claimed === 0) {
+      return null;
     }
 
-    if (direction === LedgerDirection.DEBIT && balance.available < amount) {
+    // The guard travels with the write, so a debit can never observe a balance
+    // that a concurrent transaction has already spent.
+    const guard =
+      direction === LedgerDirection.DEBIT
+        ? Prisma.sql`AND "available" >= ${amount}`
+        : Prisma.empty;
+
+    const delta = direction === LedgerDirection.CREDIT ? amount : -amount;
+
+    const moved = await tx.$queryRaw<{ available: bigint }[]>(Prisma.sql`
+      UPDATE "partner_balances"
+         SET "available" = "available" + ${delta},
+             "updated_at" = NOW()
+       WHERE "partner_id" = ${partnerId}::uuid
+         AND "currency" = ${currency}
+         ${guard}
+      RETURNING "available"
+    `);
+
+    if (moved.length === 0) {
+      // Give the claim back: the caller records the failure and commits, so an
+      // abandoned entry would look like a debit that never happened.
+      await tx.balanceLedger.delete({ where: { id: ledgerId } });
+
+      const current = await tx.partnerBalance.findFirstOrThrow({
+        where: { partnerId, currency },
+      });
+
       throw new DomainException(
         1027,
         'insufficient_balance',
         'Partner balance is insufficient for this debit.',
         {
           currency,
-          available: toMinorUnits(balance.available),
+          available: toMinorUnits(current.available),
           required: toMinorUnits(amount),
         },
       );
     }
 
-    const next =
-      direction === LedgerDirection.CREDIT
-        ? balance.available + amount
-        : balance.available - amount;
-
-    const updated = await tx.partnerBalance.update({
-      where: { id: balance.id },
-      data: { available: next },
+    await tx.balanceLedger.update({
+      where: { id: ledgerId },
+      data: { balanceAfter: moved[0].available },
     });
 
-    await tx.balanceLedger.create({
-      data: {
-        id: randomUUID(),
-        partnerId,
-        currency,
-        direction,
-        amount,
-        balanceAfter: next,
-        referenceType,
-        referenceId,
-        description,
-      },
+    return tx.partnerBalance.findFirstOrThrow({
+      where: { partnerId, currency },
     });
+  }
 
-    return updated;
+  private async ensureBalanceRow(
+    tx: Prisma.TransactionClient,
+    partnerId: string,
+    currency: string,
+  ): Promise<void> {
+    await tx.$executeRaw`
+      INSERT INTO "partner_balances" (
+        "id", "partner_id", "currency", "available", "pending",
+        "created_at", "updated_at"
+      )
+      VALUES (
+        ${randomUUID()}::uuid, ${partnerId}::uuid, ${currency}, 0, 0, NOW(), NOW()
+      )
+      ON CONFLICT ("partner_id", "currency") DO NOTHING
+    `;
   }
 }
