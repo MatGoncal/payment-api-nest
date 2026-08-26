@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Partner, Payment, PaymentSplit } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { DomainException } from '../common/exceptions/domain.exception';
+import { PaymentStateMachine } from '../common/payment-state-machine';
 import { toMinorUnits } from '../common/utils/money.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateSplitsDto } from './dto/create-splits.dto';
@@ -26,12 +27,16 @@ export class SplitsService {
         );
       }
 
-      if (payment.status === 'CANCELLED') {
+      // Splits are the allocation rule applied at settlement, so they are only
+      // editable while the payment can still settle. Rewriting them after the
+      // money moved would leave the ledger describing a split that never
+      // happened.
+      if (PaymentStateMachine.isTerminal(payment.status)) {
         throw new DomainException(
           1015,
           'settlement_failed',
-          'Cannot define splits on a cancelled payment.',
-          { payment_id: payment.id },
+          'Cannot define splits on a payment that is no longer open.',
+          { payment_id: payment.id, status: payment.status },
         );
       }
 

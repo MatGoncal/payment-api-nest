@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Partner, FxQuote } from '@prisma/client';
+import { Partner, FxQuote, Prisma } from '@prisma/client';
 import { DomainException } from '../common/exceptions/domain.exception';
 import { toMinorUnits } from '../common/utils/money.util';
 import { PrismaService } from '../prisma/prisma.service';
@@ -50,7 +50,42 @@ export class FxService {
     return this.toResponse(quote);
   }
 
+  /**
+   * A rate lock is single use: claiming it stamps `consumed_at` so the same
+   * quote can never price two conversions. Callers inside a transaction pass
+   * their client so the claim commits with the rest of their work.
+   */
+  async consume(
+    quoteId: string,
+    client: Prisma.TransactionClient = this.prisma,
+  ): Promise<FxQuote> {
+    this.assertUsable(
+      await client.fxQuote.findUniqueOrThrow({ where: { id: quoteId } }),
+    );
+
+    // The guard travels with the write, so two callers racing on the same quote
+    // cannot both walk away believing they claimed it.
+    const claimed = await client.fxQuote.updateMany({
+      where: { id: quoteId, consumedAt: null },
+      data: { consumedAt: new Date() },
+    });
+
+    const quote = await client.fxQuote.findUniqueOrThrow({
+      where: { id: quoteId },
+    });
+
+    if (claimed.count === 0) {
+      throw this.consumedException(quote);
+    }
+
+    return quote;
+  }
+
   assertUsable(quote: FxQuote): void {
+    if (quote.consumedAt !== null) {
+      throw this.consumedException(quote);
+    }
+
     if (quote.expiresAt.getTime() <= Date.now()) {
       throw new DomainException(
         1031,
@@ -62,6 +97,18 @@ export class FxService {
         },
       );
     }
+  }
+
+  private consumedException(quote: FxQuote): DomainException {
+    return new DomainException(
+      1032,
+      'quote_consumed',
+      'FX quote already consumed; a rate lock can only be used once.',
+      {
+        quote_id: quote.id,
+        consumed_at: quote.consumedAt?.toISOString() ?? null,
+      },
+    );
   }
 
   toResponse(quote: FxQuote): FxQuoteResponse {

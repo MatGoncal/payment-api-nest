@@ -61,6 +61,8 @@ See `Docs/runbooks/testes.md`.
 | `src/payments/fake-pix.provider.ts` | Synthetic PIX provider |
 | `src/webhooks/process-payment-webhook.processor.ts` | Webhook side effects |
 | `src/payouts/process-payout.processor.ts` | Payout confirm + debit |
+| `src/common/payment-state-machine.ts` | Allowed payment status transitions |
+| `src/common/queue.config.ts` | Retry/backoff defaults for money queues |
 | `prisma/schema.prisma` | Database schema |
 
 ## Quick lookup

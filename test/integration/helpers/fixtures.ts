@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { Partner, Payment, Payout } from '@prisma/client';
+import { FxQuote, Partner, Payment, Payout } from '@prisma/client';
 import { PaymentStatus, PayoutStatus } from '../../../src/common/enums';
 import { PrismaService } from '../../../src/prisma/prisma.service';
 
@@ -59,6 +59,26 @@ export function createPayout(
       currency: 'BRL',
       destinationType: 'pix_key',
       destinationValue: `${randomUUID()}@acme.test`,
+      ...overrides,
+    },
+  });
+}
+
+export function createFxQuote(
+  prisma: PrismaService,
+  partner: Partner,
+  overrides: Partial<FxQuote> = {},
+): Promise<FxQuote> {
+  return prisma.fxQuote.create({
+    data: {
+      id: randomUUID(),
+      partnerId: partner.id,
+      sourceCurrency: 'BRL',
+      targetCurrency: 'USD',
+      sourceAmount: 10_000n,
+      targetAmount: 1_850n,
+      rate: '0.18500000',
+      expiresAt: new Date(Date.now() + 300_000),
       ...overrides,
     },
   });
