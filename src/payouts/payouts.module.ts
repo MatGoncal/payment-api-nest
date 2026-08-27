@@ -3,6 +3,7 @@ import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
 import { BalancesModule } from '../balances/balances.module';
 import { MONEY_JOB_OPTIONS } from '../common/queue.config';
+import { IdempotencyModule } from '../idempotency/idempotency.module';
 import { PROCESS_PAYOUT_QUEUE, PayoutsService } from './payouts.service';
 import { PayoutsController } from './payouts.controller';
 import { ProcessPayoutProcessor } from './process-payout.processor';
@@ -11,6 +12,7 @@ import { ProcessPayoutProcessor } from './process-payout.processor';
   imports: [
     AuthModule,
     BalancesModule,
+    IdempotencyModule,
     BullModule.registerQueue({
       name: PROCESS_PAYOUT_QUEUE,
       defaultJobOptions: MONEY_JOB_OPTIONS,

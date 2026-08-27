@@ -29,5 +29,6 @@ contract consumed by `checkout-portal-next`.
 ## Success (Fases 0–5)
 
 Partner authenticates with API key, creates PENDING payment with QR, signed
-webhook moves to PAID once, balances credit, async payouts debit on confirm,
+webhook moves to PAID once, balances credit, async payouts reserve on create
+and debit on confirm,
 splits validated at settlement.

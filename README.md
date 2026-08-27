@@ -57,6 +57,7 @@ Both repos share the same OpenAPI contract, error codes, and integer minor-unit 
 | `npm run lint` | ESLint |
 | `npm run build` | Production build |
 | `npm run db:seed` | Seed demo partner |
+| `npm run reconcile` | Compare `available+pending` to the ledger (exit 1 on drift) |
 
 ## Docs
 

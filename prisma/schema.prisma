@@ -20,6 +20,7 @@ model Partner {
   partnerBalances PartnerBalance[]
   fxQuotes        FxQuote[]
   payouts         Payout[]
+  idempotencyKeys IdempotencyKey[]
 
   @@map("partners")
 }
@@ -153,4 +154,23 @@ model PaymentSplit {
 
   @@unique([paymentId, party])
   @@map("payment_splits")
+}
+
+model IdempotencyKey {
+  id           String    @id @default(uuid()) @db.Uuid
+  partnerId    String    @map("partner_id") @db.Uuid
+  key          String    @db.VarChar(255)
+  method       String    @db.VarChar(16)
+  path         String
+  requestHash  String    @map("request_hash") @db.VarChar(64)
+  responseCode Int?      @map("response_code")
+  responseBody Json?     @map("response_body")
+  expiresAt    DateTime  @map("expires_at") @db.Timestamptz
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  partner Partner @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  @@unique([partnerId, key])
+  @@map("idempotency_keys")
 }

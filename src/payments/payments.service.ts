@@ -4,6 +4,7 @@ import { PaymentStatus } from '../common/enums';
 import { toMinorUnits } from '../common/utils/money.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreatePaymentDto } from './dto/create-payment.dto';
+import { ListPaymentsQueryDto } from './dto/list-payments-query.dto';
 import { FakePixProvider } from './fake-pix.provider';
 
 export type PaymentResponse = {
@@ -17,6 +18,16 @@ export type PaymentResponse = {
   expires_at: string;
   paid_at: string | null;
   created_at: string;
+};
+
+export type PaymentsListResponse = {
+  data: PaymentResponse[];
+  meta: {
+    page: number;
+    per_page: number;
+    total: number;
+    total_pages: number;
+  };
 };
 
 @Injectable()
@@ -70,6 +81,44 @@ export class PaymentsService {
     }
 
     return this.toResponse(payment);
+  }
+
+  async listForPartner(
+    partner: Partner,
+    query: ListPaymentsQueryDto,
+  ): Promise<PaymentsListResponse> {
+    const page = Math.max(1, query.page ?? 1);
+    const perPage = Math.min(50, Math.max(1, query.per_page ?? 10));
+
+    const where = {
+      partnerId: partner.id,
+      ...(query.status
+        ? { status: query.status.toUpperCase() as PaymentStatus }
+        : {}),
+      ...(query.external_id
+        ? { externalId: { contains: query.external_id } }
+        : {}),
+    };
+
+    const [items, total] = await Promise.all([
+      this.prisma.payment.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * perPage,
+        take: perPage,
+      }),
+      this.prisma.payment.count({ where }),
+    ]);
+
+    return {
+      data: items.map((payment) => this.toResponse(payment)),
+      meta: {
+        page,
+        per_page: perPage,
+        total,
+        total_pages: Math.ceil(total / perPage) || 1,
+      },
+    };
   }
 
   toResponse(payment: Payment): PaymentResponse {
