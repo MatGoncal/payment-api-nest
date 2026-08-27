@@ -1,4 +1,4 @@
-import { BadGatewayException, Injectable } from '@nestjs/common';
+import { BadGatewayException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
 
@@ -10,6 +10,8 @@ export type FakePixCharge = {
 
 @Injectable()
 export class FakePixProvider {
+  private readonly logger = new Logger(FakePixProvider.name);
+
   constructor(private readonly config: ConfigService) {}
 
   async createCharge(
@@ -45,11 +47,17 @@ export class FakePixProvider {
         }),
         signal: AbortSignal.timeout(5000),
       });
-    } catch {
+    } catch (err: unknown) {
+      this.logger.warn(
+        `PIX provider unavailable: ${this.connectionReason(err)}`,
+      );
       this.failGateway();
     }
 
     if (response.status !== 201) {
+      this.logger.warn(
+        `PIX provider unavailable: HTTP ${response.status} ${await this.bodySnippet(response)}`,
+      );
       this.failGateway();
     }
 
@@ -60,6 +68,7 @@ export class FakePixProvider {
         copy_paste?: unknown;
       };
     } catch {
+      this.logger.warn('PIX provider unavailable: invalid payload');
       this.failGateway();
     }
 
@@ -71,6 +80,7 @@ export class FakePixProvider {
       typeof copyPaste !== 'string' ||
       copyPaste === ''
     ) {
+      this.logger.warn('PIX provider unavailable: invalid payload');
       this.failGateway();
     }
 
@@ -83,6 +93,32 @@ export class FakePixProvider {
 
   syntheticPaymentId(): string {
     return randomUUID();
+  }
+
+  private connectionReason(err: unknown): string {
+    const name = err instanceof Error ? err.name : '';
+    const message =
+      err instanceof Error
+        ? err.message.toLowerCase()
+        : String(err).toLowerCase();
+    if (
+      name === 'TimeoutError' ||
+      name === 'AbortError' ||
+      message.includes('timeout') ||
+      message.includes('aborted')
+    ) {
+      return 'timeout';
+    }
+    return 'connection refused';
+  }
+
+  private async bodySnippet(response: Response): Promise<string> {
+    try {
+      const text = await response.text();
+      return text.slice(0, 200);
+    } catch {
+      return '';
+    }
   }
 
   private failGateway(): never {

@@ -1,4 +1,4 @@
-import { BadGatewayException } from '@nestjs/common';
+import { BadGatewayException, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { FakePixProvider } from './fake-pix.provider';
 
@@ -14,14 +14,20 @@ function testConfig(): ConfigService {
 }
 
 function jsonResponse(status: number, body: unknown): Promise<Response> {
+  const raw = JSON.stringify(body);
   return Promise.resolve({
     status,
     json: () => Promise.resolve(body),
+    text: () => Promise.resolve(raw),
   } as Response);
 }
 
 describe('FakePixProvider', () => {
   const provider = new FakePixProvider(testConfig());
+
+  beforeEach(() => {
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+  });
 
   afterEach(() => {
     jest.restoreAllMocks();
@@ -87,4 +93,17 @@ describe('FakePixProvider', () => {
       provider.createCharge(1500, 'USD', PAYMENT_ID),
     ).rejects.toBeInstanceOf(BadGatewayException);
   });
+
+  it.each(['AbortError', 'TimeoutError'] as const)(
+    'throws 502 when fetch rejects with %s',
+    async (name) => {
+      const err = new Error('The operation was aborted due to timeout');
+      err.name = name;
+      jest.spyOn(globalThis, 'fetch').mockRejectedValue(err);
+
+      await expect(
+        provider.createCharge(1500, 'BRL', PAYMENT_ID),
+      ).rejects.toBeInstanceOf(BadGatewayException);
+    },
+  );
 });

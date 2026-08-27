@@ -16,7 +16,7 @@ export class CreatePaymentDto {
 
   @IsString()
   @Length(3, 3)
-  @Matches(/^[A-Z]{3}$/)
+  @Matches(/^BRL$/)
   currency!: string;
 
   @IsOptional()
