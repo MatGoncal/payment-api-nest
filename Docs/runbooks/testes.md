@@ -48,6 +48,15 @@ accept a config that BullMQ rejects. It reads `REDIS_HOST`/`REDIS_PORT` and
 defaults to `localhost:6379`; the local compose stack publishes Redis on
 **6380**.
 
+## Reconcile (read-only)
+
+```bash
+npm run reconcile
+```
+
+Exit 0 when `available + pending` matches the ledger net; exit 1 with a
+`ledger_mismatch` line otherwise. See `Docs/runbooks/incidents.md`.
+
 ## Tear down
 
 ```bash

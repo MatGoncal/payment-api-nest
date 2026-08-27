@@ -42,17 +42,28 @@ export class PayoutsService {
     partner: Partner,
     dto: CreatePayoutDto,
   ): Promise<PayoutResponse> {
-    const payout = await this.prisma.payout.create({
-      data: {
-        id: randomUUID(),
-        partnerId: partner.id,
-        status: PayoutStatus.QUEUED,
-        amount: BigInt(dto.amount),
-        currency: dto.currency.toUpperCase(),
-        destinationType: dto.destination.type,
-        destinationValue: dto.destination.value,
-        externalId: dto.external_id ?? null,
-      },
+    const payout = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.payout.create({
+        data: {
+          id: randomUUID(),
+          partnerId: partner.id,
+          status: PayoutStatus.QUEUED,
+          amount: BigInt(dto.amount),
+          currency: dto.currency.toUpperCase(),
+          destinationType: dto.destination.type,
+          destinationValue: dto.destination.value,
+          externalId: dto.external_id ?? null,
+        },
+      });
+
+      await this.balances.reserve(
+        tx,
+        partner.id,
+        dto.currency.toUpperCase(),
+        BigInt(dto.amount),
+      );
+
+      return created;
     });
 
     await this.payoutQueue.add(
@@ -67,6 +78,10 @@ export class PayoutsService {
   async process(payoutId: string): Promise<void> {
     await this.prisma.$transaction(
       async (tx) => {
+        await tx.$executeRaw`
+          SELECT 1 FROM "payouts" WHERE "id" = ${payoutId}::uuid FOR UPDATE
+        `;
+
         const payout = await tx.payout.findUnique({ where: { id: payoutId } });
 
         if (!payout || payout.status !== 'QUEUED') {
@@ -79,7 +94,7 @@ export class PayoutsService {
         });
 
         try {
-          await this.balances.debit(
+          await this.balances.confirmDebit(
             tx,
             payout.partnerId,
             payout.currency,
@@ -99,10 +114,22 @@ export class PayoutsService {
             },
           });
         } catch (error) {
-          // An insufficient balance is a business outcome, not a database
-          // error: the transaction is still usable, so the payout can be
-          // recorded as failed in the same commit that left funds untouched.
+          // A domain failure is a business outcome: release the hold (if it
+          // is still there) and record FAILED in the same commit.
           if (error instanceof DomainException) {
+            try {
+              await this.balances.release(
+                tx,
+                payout.partnerId,
+                payout.currency,
+                payout.amount,
+              );
+            } catch (releaseError) {
+              if (!(releaseError instanceof DomainException)) {
+                throw releaseError;
+              }
+            }
+
             await tx.payout.update({
               where: { id: payoutId },
               data: {

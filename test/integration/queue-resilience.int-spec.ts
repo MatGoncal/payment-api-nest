@@ -3,7 +3,7 @@ import { BalancesService } from '../../src/balances/balances.service';
 import { PayoutStatus } from '../../src/common/enums';
 import { MONEY_JOB_OPTIONS } from '../../src/common/queue.config';
 import { PayoutsService, payoutJobId } from '../../src/payouts/payouts.service';
-import { createPartner, createPayout, fundBalance } from './helpers/fixtures';
+import { createPartner, fundBalance } from './helpers/fixtures';
 import { withTestDb } from './helpers/test-db';
 
 const connection = {
@@ -90,7 +90,6 @@ describe('money queues survive a transient failure', () => {
   it('debits once when the same payout is processed twice', async () => {
     const partner = await createPartner(db.prisma);
     await fundBalance(db.prisma, partner, 5000n);
-    const payout = await createPayout(db.prisma, partner, { amount: 2000n });
 
     const payouts = new PayoutsService(
       db.prisma,
@@ -98,13 +97,20 @@ describe('money queues survive a transient failure', () => {
       queue,
     );
 
+    const created = await payouts.create(partner, {
+      amount: 2000,
+      currency: 'BRL',
+      destination: { type: 'pix_key', value: 'replay@acme.test' },
+      external_id: 'payout-replay-once',
+    });
+
     // A worker can pick the same job up twice: after a crash between the debit
     // and the ack, or when a duplicate was enqueued.
-    await payouts.process(payout.id);
-    await payouts.process(payout.id);
+    await payouts.process(created.id);
+    await payouts.process(created.id);
 
     const settled = await db.prisma.payout.findUniqueOrThrow({
-      where: { id: payout.id },
+      where: { id: created.id },
     });
     const balance = await db.prisma.partnerBalance.findFirstOrThrow({
       where: { partnerId: partner.id, currency: 'BRL' },
@@ -112,6 +118,7 @@ describe('money queues survive a transient failure', () => {
 
     expect(settled.status).toBe(PayoutStatus.COMPLETED);
     expect(balance.available).toBe(3000n);
+    expect(balance.pending).toBe(0n);
     expect(await db.prisma.balanceLedger.count()).toBe(1);
   });
 });

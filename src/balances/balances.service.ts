@@ -76,6 +76,153 @@ export class BalancesService {
   }
 
   /**
+   * Hold funds for a queued payout. No ledger row — the money is still the
+   * platform's until confirmDebit.
+   */
+  async reserve(
+    tx: Prisma.TransactionClient,
+    partnerId: string,
+    currency: string,
+    amount: bigint,
+  ): Promise<PartnerBalance> {
+    this.assertPositiveAmount(amount);
+    await this.ensureBalanceRow(tx, partnerId, currency);
+
+    const moved = await tx.$queryRaw<
+      { available: bigint; pending: bigint }[]
+    >(Prisma.sql`
+      UPDATE "partner_balances"
+         SET "available" = "available" - ${amount},
+             "pending" = "pending" + ${amount},
+             "updated_at" = NOW()
+       WHERE "partner_id" = ${partnerId}::uuid
+         AND "currency" = ${currency}
+         AND "available" >= ${amount}
+      RETURNING "available", "pending"
+    `);
+
+    if (moved.length === 0) {
+      throw await this.insufficientBalance(
+        tx,
+        partnerId,
+        currency,
+        amount,
+        'available',
+      );
+    }
+
+    return tx.partnerBalance.findFirstOrThrow({
+      where: { partnerId, currency },
+    });
+  }
+
+  /**
+   * Return a hold to available (payout FAILED). No ledger row.
+   */
+  async release(
+    tx: Prisma.TransactionClient,
+    partnerId: string,
+    currency: string,
+    amount: bigint,
+  ): Promise<PartnerBalance> {
+    this.assertPositiveAmount(amount);
+
+    const moved = await tx.$queryRaw<{ pending: bigint }[]>(Prisma.sql`
+      UPDATE "partner_balances"
+         SET "pending" = "pending" - ${amount},
+             "available" = "available" + ${amount},
+             "updated_at" = NOW()
+       WHERE "partner_id" = ${partnerId}::uuid
+         AND "currency" = ${currency}
+         AND "pending" >= ${amount}
+      RETURNING "pending"
+    `);
+
+    if (moved.length === 0) {
+      throw await this.insufficientBalance(
+        tx,
+        partnerId,
+        currency,
+        amount,
+        'pending',
+      );
+    }
+
+    return tx.partnerBalance.findFirstOrThrow({
+      where: { partnerId, currency },
+    });
+  }
+
+  /**
+   * Consume a hold and write the ledger debit. Returns null when this
+   * reference was already applied so a job replay does not touch pending.
+   */
+  async confirmDebit(
+    tx: Prisma.TransactionClient,
+    partnerId: string,
+    currency: string,
+    amount: bigint,
+    referenceType: string,
+    referenceId: string,
+    description: string,
+  ): Promise<PartnerBalance | null> {
+    this.assertPositiveAmount(amount);
+    await this.ensureBalanceRow(tx, partnerId, currency);
+
+    const ledgerId = randomUUID();
+
+    const claimed = await tx.$executeRaw`
+      INSERT INTO "balance_ledger" (
+        "id", "partner_id", "currency", "direction", "amount", "balance_after",
+        "reference_type", "reference_id", "description", "created_at", "updated_at"
+      )
+      VALUES (
+        ${ledgerId}::uuid, ${partnerId}::uuid, ${currency}, ${LedgerDirection.DEBIT},
+        ${amount}, 0, ${referenceType}, ${referenceId}::uuid, ${description},
+        NOW(), NOW()
+      )
+      ON CONFLICT ("reference_type", "reference_id", "direction") DO NOTHING
+    `;
+
+    if (claimed === 0) {
+      return null;
+    }
+
+    const moved = await tx.$queryRaw<
+      { available: bigint; pending: bigint }[]
+    >(Prisma.sql`
+      UPDATE "partner_balances"
+         SET "pending" = "pending" - ${amount},
+             "updated_at" = NOW()
+       WHERE "partner_id" = ${partnerId}::uuid
+         AND "currency" = ${currency}
+         AND "pending" >= ${amount}
+      RETURNING "available", "pending"
+    `);
+
+    if (moved.length === 0) {
+      await tx.balanceLedger.delete({ where: { id: ledgerId } });
+
+      throw await this.insufficientBalance(
+        tx,
+        partnerId,
+        currency,
+        amount,
+        'pending',
+      );
+    }
+
+    await tx.balanceLedger.update({
+      where: { id: ledgerId },
+      data: { balanceAfter: moved[0].available + moved[0].pending },
+    });
+
+    return tx.partnerBalance.findFirstOrThrow({
+      where: { partnerId, currency },
+    });
+  }
+
+  /**
    * Returns null when the reference had already been applied.
    *
    * @throws DomainException on a non-positive amount or an overdraft.
@@ -170,6 +317,40 @@ export class BalancesService {
     return tx.partnerBalance.findFirstOrThrow({
       where: { partnerId, currency },
     });
+  }
+
+  private assertPositiveAmount(amount: bigint): void {
+    if (amount <= 0n) {
+      throw new DomainException(
+        1015,
+        'settlement_failed',
+        'Amount must be a positive integer in minor units.',
+        { amount: Number(amount) },
+      );
+    }
+  }
+
+  private async insufficientBalance(
+    tx: Prisma.TransactionClient,
+    partnerId: string,
+    currency: string,
+    amount: bigint,
+    column: 'available' | 'pending',
+  ): Promise<DomainException> {
+    const current = await tx.partnerBalance.findFirstOrThrow({
+      where: { partnerId, currency },
+    });
+
+    return new DomainException(
+      1027,
+      'insufficient_balance',
+      'Partner balance is insufficient for this debit.',
+      {
+        currency,
+        [column]: toMinorUnits(current[column]),
+        required: toMinorUnits(amount),
+      },
+    );
   }
 
   private async ensureBalanceRow(

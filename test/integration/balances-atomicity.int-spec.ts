@@ -70,15 +70,39 @@ describe('balance writes join the caller transaction', () => {
     expect(await db.prisma.balanceLedger.count()).toBe(0);
   });
 
+  it('rolls a payout reserve back when the surrounding transaction fails', async () => {
+    const partner = await createPartner(db.prisma);
+    await fundBalance(db.prisma, partner, 5000n);
+
+    await expect(
+      db.prisma.$transaction(async (tx) => {
+        await balances.reserve(tx, partner.id, 'BRL', 2000n);
+        throw new Error('payout insert failed after the reserve');
+      }),
+    ).rejects.toThrow('payout insert failed after the reserve');
+
+    const balance = await db.prisma.partnerBalance.findFirstOrThrow({
+      where: { partnerId: partner.id, currency: 'BRL' },
+    });
+
+    expect(balance.available).toBe(5000n);
+    expect(balance.pending).toBe(0n);
+  });
+
   it('commits the payout and its debit together', async () => {
     const partner = await createPartner(db.prisma);
     await fundBalance(db.prisma, partner, 5000n);
-    const payout = await createPayout(db.prisma, partner, { amount: 2000n });
 
-    await payouts.process(payout.id);
+    const created = await payouts.create(partner, {
+      amount: 2000,
+      currency: 'BRL',
+      destination: { type: 'pix_key', value: 'synthetic@acme.test' },
+    });
+
+    await payouts.process(created.id);
 
     const settled = await db.prisma.payout.findUniqueOrThrow({
-      where: { id: payout.id },
+      where: { id: created.id },
     });
     const balance = await db.prisma.partnerBalance.findFirstOrThrow({
       where: { partnerId: partner.id, currency: 'BRL' },
@@ -87,28 +111,31 @@ describe('balance writes join the caller transaction', () => {
 
     expect(settled.status).toBe(PayoutStatus.COMPLETED);
     expect(balance.available).toBe(3000n);
+    expect(balance.pending).toBe(0n);
     expect(entries).toHaveLength(1);
     expect(entries[0].direction).toBe('debit');
     expect(entries[0].balanceAfter).toBe(3000n);
   });
 
-  it('fails the payout without moving money when funds are short', async () => {
+  it('fails the payout create without inserting a row when funds are short', async () => {
     const partner = await createPartner(db.prisma);
     await fundBalance(db.prisma, partner, 500n);
-    const payout = await createPayout(db.prisma, partner, { amount: 2000n });
 
-    await payouts.process(payout.id);
+    await expect(
+      payouts.create(partner, {
+        amount: 2000,
+        currency: 'BRL',
+        destination: { type: 'pix_key', value: 'x@acme.test' },
+      }),
+    ).rejects.toMatchObject({ errorCode: 1027 });
 
-    const settled = await db.prisma.payout.findUniqueOrThrow({
-      where: { id: payout.id },
-    });
+    expect(await db.prisma.payout.count()).toBe(0);
+    expect(await db.prisma.balanceLedger.count()).toBe(0);
+
     const balance = await db.prisma.partnerBalance.findFirstOrThrow({
       where: { partnerId: partner.id, currency: 'BRL' },
     });
-
-    expect(settled.status).toBe(PayoutStatus.FAILED);
-    expect(settled.failureCode).toBe('1027');
     expect(balance.available).toBe(500n);
-    expect(await db.prisma.balanceLedger.count()).toBe(0);
+    expect(balance.pending).toBe(0n);
   });
 });

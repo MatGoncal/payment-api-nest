@@ -11,6 +11,8 @@ describe('PaymentsService', () => {
     payment: {
       create: jest.fn(),
       findFirst: jest.fn(),
+      findMany: jest.fn(),
+      count: jest.fn(),
     },
   };
   const pixProvider = new FakePixProvider();
@@ -70,5 +72,56 @@ describe('PaymentsService', () => {
     expect(typeof result.amount).toBe('number');
     expect(result.qr_code).toBe('00020126');
     expect(prisma.payment.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('lists partner payments with pagination metadata', async () => {
+    const createdAt = new Date('2026-08-26T12:00:00.000Z');
+    const expiresAt = new Date('2026-08-26T12:30:00.000Z');
+
+    prisma.payment.findMany.mockResolvedValue([
+      {
+        id: 'pay-1',
+        partnerId: partner.id,
+        status: PaymentStatus.PAID,
+        amount: 3200n,
+        currency: 'BRL',
+        externalId: 'order-b',
+        description: null,
+        qrCode: '00020126',
+        copyPaste: '00020126',
+        provider: 'fake_pix',
+        providerTxId: null,
+        expiresAt,
+        paidAt: createdAt,
+        createdAt,
+        updatedAt: createdAt,
+      },
+    ]);
+    prisma.payment.count.mockResolvedValue(1);
+
+    const result = await service.listForPartner(partner, {
+      status: PaymentStatus.PAID,
+      page: 1,
+      per_page: 10,
+    });
+
+    expect(result.meta).toEqual({
+      page: 1,
+      per_page: 10,
+      total: 1,
+      total_pages: 1,
+    });
+    expect(result.data).toHaveLength(1);
+    expect(result.data[0]?.status).toBe('PAID');
+    expect(prisma.payment.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          partnerId: partner.id,
+          status: PaymentStatus.PAID,
+        }),
+        skip: 0,
+        take: 10,
+      }),
+    );
   });
 });

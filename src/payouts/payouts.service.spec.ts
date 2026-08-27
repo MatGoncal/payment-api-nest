@@ -15,19 +15,26 @@ describe('PayoutsService enqueueing', () => {
     createdAt: new Date(),
   };
 
-  const prisma = { payout: { create: jest.fn().mockResolvedValue(payout) } };
+  const tx = { payout: { create: jest.fn().mockResolvedValue(payout) } };
+  const prisma = {
+    $transaction: jest.fn((fn: (client: typeof tx) => unknown) =>
+      Promise.resolve(fn(tx)),
+    ),
+  };
   const queue = { add: jest.fn() };
+  const balances = { reserve: jest.fn() };
 
   let service: PayoutsService;
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    tx.payout.create.mockResolvedValue(payout);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PayoutsService,
         { provide: PrismaService, useValue: prisma },
-        { provide: BalancesService, useValue: {} },
+        { provide: BalancesService, useValue: balances },
         { provide: getQueueToken(PROCESS_PAYOUT_QUEUE), useValue: queue },
       ],
     }).compile();
@@ -43,6 +50,7 @@ describe('PayoutsService enqueueing', () => {
       external_id: 'payout-77',
     });
 
+    expect(balances.reserve).toHaveBeenCalled();
     // A redelivered create must not put a second debit job on the queue.
     expect(queue.add).toHaveBeenCalledWith(
       'process',
