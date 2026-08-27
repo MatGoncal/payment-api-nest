@@ -5,6 +5,9 @@
 Partner authenticates with an API key and creates a PIX cash-in that returns
 QR + copia-e-cola in `PENDING` status.
 
+> Fase 9: QR is fetched from `fake-pix-provider` over HTTP. See
+> `Docs/specs/fase-9-fake-pix-http.md`.
+
 ## Endpoints
 
 | Método | Rota | Auth | Descrição |
@@ -16,7 +19,8 @@ QR + copia-e-cola in `PENDING` status.
 
 1. `ApiKeyGuard` resolves partner from SHA-256 hash (`Bearer` or `X-Api-Key`).
 2. `CreatePaymentDto` validates amount (int > 0), currency, optional fields.
-3. `PaymentsService` calls `FakePixProvider` for QR payloads.
+3. `PaymentsService` generates the payment UUID, then `await`s
+   `FakePixProvider.createCharge`, which POSTs Go `/v1/charges` (Fase 9).
 4. Persist `payments` row as `PENDING`.
 5. Return `201` per `API_CONTRACT.md`.
 

@@ -58,7 +58,7 @@ See `Docs/runbooks/testes.md`.
 | `src/fx/fx.service.ts` | FX quotes |
 | `src/payouts/payouts.service.ts` | Async payouts |
 | `src/splits/splits.service.ts` | Payment splits |
-| `src/payments/fake-pix.provider.ts` | Synthetic PIX provider |
+| `src/payments/fake-pix.provider.ts` | HTTP client of `fake-pix-provider` (not a real PSP) |
 | `src/webhooks/process-payment-webhook.processor.ts` | Webhook side effects |
 | `src/payouts/process-payout.processor.ts` | Payout confirm + pending debit |
 | `src/cli/reconcile.ts` | Read-only `npm run reconcile` |
@@ -84,6 +84,7 @@ See `Docs/runbooks/testes.md`.
 | Fase 6 HMAC + Idempotency-Key | `Docs/specs/fase-6-idempotency-hmac.md` |
 | Fase 7 pending payout hold | `Docs/specs/fase-7-pending-payout.md` |
 | Fase 8 reconcile | `Docs/specs/fase-8-reconcile.md` |
+| Fase 9 FakePix HTTP | `Docs/specs/fase-9-fake-pix-http.md` |
 | ADRs | `Docs/adrs/` |
 | Incidents | `Docs/runbooks/incidents.md` |
 | How to test | `Docs/runbooks/testes.md` |
@@ -115,11 +116,12 @@ See `Docs/runbooks/testes.md`.
 | 6 | HMAC timestamp + Idempotency-Key | `Docs/specs/fase-6-idempotency-hmac.md` |
 | 7 | Payout pending hold | `Docs/specs/fase-7-pending-payout.md` |
 | 8 | Read-only reconcile | `Docs/specs/fase-8-reconcile.md` |
+| 9 | FakePixProvider HTTP client of `fake-pix-provider` | `Docs/specs/fase-9-fake-pix-http.md` |
 
 ## Do NOT
 
 - Use `float`/`number` decimals for money — integer minor units only (BigInt in DB)
-- Call a real PSP — only `FakePixProvider`
+- Call a real PSP — `FakePixProvider` is an HTTP client of `fake-pix-provider` only
 - Copy StarsPay production code or secrets
 - Invent error codes outside `error-codes.md`
 - Use global prefix that breaks `/v1/*` contract paths
