@@ -47,6 +47,7 @@ npm run start:dev
 - Swagger: `http://localhost:3001/docs`
 - Demo API key: `demo-partner-key`
 - Webhook secret: `dev-webhook-secret`
+- Docker (`--profile full`): `FAKE_PIX_BASE_URL=http://host.docker.internal:8080`, callback `http://localhost:3001/v1/webhooks/payment`. Host Node keeps `.env.example` (`127.0.0.1`).
 
 ## Laravel vs Nest (portfolio comparison)
 

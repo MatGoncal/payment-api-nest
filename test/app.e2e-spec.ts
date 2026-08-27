@@ -25,6 +25,15 @@ function expectErrorCode(body: unknown, code: number, name?: string): void {
   }
 }
 
+const prisma = {
+  onModuleInit: jest.fn(),
+  onModuleDestroy: jest.fn(),
+  partner: { findFirst: jest.fn().mockResolvedValue(null) },
+  payment: { create: jest.fn() },
+  $connect: jest.fn(),
+  $disconnect: jest.fn(),
+};
+
 describe('App smoke (e2e)', () => {
   let app: INestApplication<App>;
 
@@ -33,13 +42,7 @@ describe('App smoke (e2e)', () => {
       imports: [AppModule],
     })
       .overrideProvider(PrismaService)
-      .useValue({
-        onModuleInit: jest.fn(),
-        onModuleDestroy: jest.fn(),
-        partner: { findFirst: jest.fn().mockResolvedValue(null) },
-        $connect: jest.fn(),
-        $disconnect: jest.fn(),
-      })
+      .useValue(prisma)
       .compile();
 
     app = moduleFixture.createNestApplication({ bodyParser: false });
@@ -66,6 +69,32 @@ describe('App smoke (e2e)', () => {
       .post('/v1/payments')
       .send({ amount: 1500, currency: 'BRL' })
       .expect(401);
+  });
+
+  it('POST /v1/payments with USD returns validation_error and does not call Go', async () => {
+    const fetchSpy = jest.spyOn(globalThis, 'fetch');
+    prisma.partner.findFirst.mockResolvedValue({
+      id: '550e8400-e29b-41d4-a716-446655440001',
+      name: 'Demo',
+      apiKeyHash: 'hash',
+      apiKeyPrefix: 'demo-par',
+      isActive: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    const response = await request(app.getHttpServer())
+      .post('/v1/payments')
+      .set('Authorization', 'Bearer demo-partner-key')
+      .send({ amount: 1500, currency: 'USD' })
+      .expect(400);
+
+    expectErrorCode(response.body, 422, 'validation_error');
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(prisma.payment.create).not.toHaveBeenCalled();
+
+    fetchSpy.mockRestore();
+    prisma.partner.findFirst.mockResolvedValue(null);
   });
 
   it('POST /v1/webhooks/payment with an old timestamp returns 401/1044', async () => {
