@@ -44,6 +44,21 @@ export class GlobalExceptionFilter implements ExceptionFilter {
         });
       }
 
+      if (status === 502) {
+        return response.status(status).json({
+          error: {
+            code: status,
+            name: 'bad_gateway',
+            message:
+              typeof body === 'string'
+                ? body
+                : ((body as { message?: string | string[] }).message ??
+                  'PIX provider unavailable.'),
+            details: {},
+          },
+        });
+      }
+
       if (status === 404) {
         return response.status(status).json({
           error: {

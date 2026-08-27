@@ -9,7 +9,7 @@ contract consumed by `checkout-portal-next`.
 - Demonstrate the same HTTP contract as `pix-wallet-api` (Laravel) with a
   TypeScript/Nest stack: idempotent webhooks, integer money, BullMQ jobs.
 - Stay demoable locally with Docker Compose (Postgres + Redis) and
-  `FakePixProvider`.
+  `FakePixProvider` (HTTP client of `fake-pix-provider`).
 - Keep specs in git (`Docs/`) for portfolio visibility.
 
 ## Non-goals

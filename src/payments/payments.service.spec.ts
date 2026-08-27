@@ -1,9 +1,12 @@
+import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { Partner } from '@prisma/client';
 import { PaymentStatus } from '../common/enums';
 import { PrismaService } from '../prisma/prisma.service';
 import { FakePixProvider } from './fake-pix.provider';
 import { PaymentsService } from './payments.service';
+
+const SYNTHETIC_QR = '00020126ACMEPAY.FAKE.PIX.BRL.1500.0.synthetic';
 
 describe('PaymentsService', () => {
   let service: PaymentsService;
@@ -15,7 +18,13 @@ describe('PaymentsService', () => {
       count: jest.fn(),
     },
   };
-  const pixProvider = new FakePixProvider();
+  const pixProvider = new FakePixProvider(
+    new ConfigService({
+      FAKE_PIX_BASE_URL: 'http://127.0.0.1:8080',
+      FAKE_PIX_API_KEY: 'fake-pix-demo',
+      FAKE_PIX_CALLBACK_URL: 'http://127.0.0.1:3001/v1/webhooks/payment',
+    }),
+  );
 
   const partner = {
     id: 'partner-uuid',
@@ -29,6 +38,14 @@ describe('PaymentsService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    jest.spyOn(globalThis, 'fetch').mockResolvedValue({
+      status: 201,
+      json: () =>
+        Promise.resolve({
+          qr_code: SYNTHETIC_QR,
+          copy_paste: SYNTHETIC_QR,
+        }),
+    } as Response);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -39,6 +56,10 @@ describe('PaymentsService', () => {
     }).compile();
 
     service = module.get(PaymentsService);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
   });
 
   it('creates a PENDING payment with integer minor units', async () => {
@@ -115,10 +136,10 @@ describe('PaymentsService', () => {
     expect(result.data[0]?.status).toBe('PAID');
     expect(prisma.payment.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({
+        where: {
           partnerId: partner.id,
           status: PaymentStatus.PAID,
-        }),
+        },
         skip: 0,
         take: 10,
       }),

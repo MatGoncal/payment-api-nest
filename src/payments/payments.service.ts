@@ -43,7 +43,7 @@ export class PaymentsService {
   ): Promise<PaymentResponse> {
     const paymentId = this.pixProvider.syntheticPaymentId();
     const expiresIn = dto.expires_in_seconds ?? 1800;
-    const charge = this.pixProvider.createCharge(
+    const charge = await this.pixProvider.createCharge(
       dto.amount,
       dto.currency,
       paymentId,

@@ -1,3 +1,4 @@
+import { ConfigService } from '@nestjs/config';
 import { Queue } from 'bullmq';
 import { IdempotencyService } from '../../src/idempotency/idempotency.service';
 import { FakePixProvider } from '../../src/payments/fake-pix.provider';
@@ -9,6 +10,8 @@ import { CreatePayoutDto } from '../../src/payouts/dto/create-payout.dto';
 import { createPartner, fundBalance } from './helpers/fixtures';
 import { withTestDb } from './helpers/test-db';
 
+const SYNTHETIC_QR = '00020126ACMEPAY.FAKE.PIX.BRL.1500.0.synthetic';
+
 describe('idempotency keys', () => {
   const db = withTestDb();
   const queue = { add: jest.fn() } as unknown as Queue;
@@ -16,15 +19,38 @@ describe('idempotency keys', () => {
   let idempotency: IdempotencyService;
   let payments: PaymentsService;
   let payouts: PayoutsService;
+  let fetchSpy: jest.SpiedFunction<typeof fetch>;
 
   beforeAll(() => {
+    fetchSpy = jest.spyOn(globalThis, 'fetch').mockResolvedValue({
+      status: 201,
+      json: () =>
+        Promise.resolve({
+          qr_code: SYNTHETIC_QR,
+          copy_paste: SYNTHETIC_QR,
+        }),
+    } as Response);
+
     idempotency = new IdempotencyService(db.prisma);
-    payments = new PaymentsService(db.prisma, new FakePixProvider());
+    payments = new PaymentsService(
+      db.prisma,
+      new FakePixProvider(
+        new ConfigService({
+          FAKE_PIX_BASE_URL: 'http://127.0.0.1:8080',
+          FAKE_PIX_API_KEY: 'fake-pix-demo',
+          FAKE_PIX_CALLBACK_URL: 'http://127.0.0.1:3001/v1/webhooks/payment',
+        }),
+      ),
+    );
     payouts = new PayoutsService(
       db.prisma,
       new BalancesService(db.prisma),
       queue,
     );
+  });
+
+  afterAll(() => {
+    fetchSpy.mockRestore();
   });
 
   beforeEach(() => {
