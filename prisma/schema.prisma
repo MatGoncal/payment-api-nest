@@ -35,8 +35,9 @@ model Payment {
   description  String?   @db.VarChar(140)
   qrCode       String    @map("qr_code")
   copyPaste    String    @map("copy_paste")
-  provider     String    @db.VarChar(64)
-  providerTxId String?   @map("provider_tx_id")
+  provider         String    @db.VarChar(64)
+  providerChargeId String?   @map("provider_charge_id")
+  providerTxId     String?   @map("provider_tx_id")
   expiresAt    DateTime  @map("expires_at") @db.Timestamptz
   paidAt       DateTime? @map("paid_at") @db.Timestamptz
   createdAt    DateTime  @default(now()) @map("created_at")
@@ -160,6 +161,7 @@ model IdempotencyKey {
   id           String    @id @default(uuid()) @db.Uuid
   partnerId    String    @map("partner_id") @db.Uuid
   key          String    @db.VarChar(255)
+  resourceId   String?   @map("resource_id") @db.Uuid
   method       String    @db.VarChar(16)
   path         String
   requestHash  String    @map("request_hash") @db.VarChar(64)

@@ -46,6 +46,7 @@ describe('FakePixProvider', () => {
 
     const charge = await provider.createCharge(1500, 'BRL', PAYMENT_ID);
 
+    expect(charge.id).toBe('chg_http');
     expect(charge.qr_code).toMatch(/^00020126ACMEPAY\.FAKE\.PIX/);
     expect(charge.copy_paste).toMatch(/^00020126ACMEPAY\.FAKE\.PIX/);
     expect(charge.provider).toBe('fake_pix');
@@ -72,6 +73,24 @@ describe('FakePixProvider', () => {
     expect(data.callback_url).toBe('http://127.0.0.1:3001/v1/webhooks/payment');
   });
 
+  it('accepts HTTP 200 replay and returns charge id', async () => {
+    jest.spyOn(globalThis, 'fetch').mockImplementation(() =>
+      jsonResponse(200, {
+        id: 'chg_replay',
+        status: 'PENDING',
+        qr_code: QR,
+        copy_paste: QR,
+        provider_tx_id: 'pix_tx_replay',
+      }),
+    );
+
+    const charge = await provider.createCharge(1500, 'BRL', PAYMENT_ID);
+
+    expect(charge.id).toBe('chg_replay');
+    expect(charge.qr_code).toMatch(/^00020126ACMEPAY\.FAKE\.PIX/);
+    expect(charge.provider).toBe('fake_pix');
+  });
+
   it('throws 502 when fetch is refused', async () => {
     jest
       .spyOn(globalThis, 'fetch')
@@ -82,7 +101,7 @@ describe('FakePixProvider', () => {
     ).rejects.toBeInstanceOf(BadGatewayException);
   });
 
-  it('throws 502 when provider returns non-201', async () => {
+  it('throws 502 when provider returns neither 200 nor 201', async () => {
     jest
       .spyOn(globalThis, 'fetch')
       .mockImplementation(() =>

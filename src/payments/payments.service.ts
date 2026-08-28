@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { Partner, Payment } from '@prisma/client';
+import { Partner, Payment, Prisma } from '@prisma/client';
 import { PaymentStatus } from '../common/enums';
 import { toMinorUnits } from '../common/utils/money.util';
 import { PrismaService } from '../prisma/prisma.service';
@@ -40,8 +40,9 @@ export class PaymentsService {
   async create(
     partner: Partner,
     dto: CreatePaymentDto,
+    resourceId?: string,
   ): Promise<PaymentResponse> {
-    const paymentId = this.pixProvider.syntheticPaymentId();
+    const paymentId = resourceId ?? this.pixProvider.syntheticPaymentId();
     const expiresIn = dto.expires_in_seconds ?? 1800;
     const charge = await this.pixProvider.createCharge(
       dto.amount,
@@ -49,23 +50,39 @@ export class PaymentsService {
       paymentId,
     );
 
-    const payment = await this.prisma.payment.create({
-      data: {
-        id: paymentId,
-        partnerId: partner.id,
-        status: PaymentStatus.PENDING,
-        amount: BigInt(dto.amount),
-        currency: dto.currency.toUpperCase(),
-        externalId: dto.external_id ?? null,
-        description: dto.description ?? null,
-        qrCode: charge.qr_code,
-        copyPaste: charge.copy_paste,
-        provider: charge.provider,
-        expiresAt: new Date(Date.now() + expiresIn * 1000),
-      },
-    });
+    try {
+      const payment = await this.prisma.payment.create({
+        data: {
+          id: paymentId,
+          partnerId: partner.id,
+          status: PaymentStatus.PENDING,
+          amount: BigInt(dto.amount),
+          currency: dto.currency.toUpperCase(),
+          externalId: dto.external_id ?? null,
+          description: dto.description ?? null,
+          qrCode: charge.qr_code,
+          copyPaste: charge.copy_paste,
+          provider: charge.provider,
+          providerChargeId: charge.id,
+          expiresAt: new Date(Date.now() + expiresIn * 1000),
+        },
+      });
 
-    return this.toResponse(payment);
+      return this.toResponse(payment);
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        const existing = await this.prisma.payment.findUnique({
+          where: { id: paymentId },
+        });
+        if (existing) {
+          return this.toResponse(existing);
+        }
+      }
+      throw error;
+    }
   }
 
   async findForPartner(
