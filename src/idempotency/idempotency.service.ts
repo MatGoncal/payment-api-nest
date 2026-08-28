@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { createHash } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { DomainException } from '../common/exceptions/domain.exception';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -10,8 +10,9 @@ export type IdempotencyRunParams<T> = {
   method: string;
   path: string;
   rawBody: string;
-  execute: () => Promise<T>;
+  execute: (resourceId?: string) => Promise<T>;
   responseCode: number;
+  retainResource?: boolean;
 };
 
 @Injectable()
@@ -30,31 +31,41 @@ export class IdempotencyService {
     const requestHash = createHash('sha256')
       .update(params.rawBody)
       .digest('hex');
+    const resourceId = params.retainResource ? randomUUID() : undefined;
 
-    let row: { id: string };
+    let row: { id: string; resourceId: string | null };
     try {
       row = await this.prisma.idempotencyKey.create({
         data: {
           partnerId: params.partnerId,
           key,
+          resourceId: resourceId ?? null,
           method: params.method,
           path: params.path,
           requestHash,
           expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
         },
-        select: { id: true },
+        select: { id: true, resourceId: true },
       });
     } catch (error) {
       if (this.isUniqueViolation(error)) {
-        return this.waitForSnapshot<T>(params.partnerId, key, requestHash);
+        return this.onExistingKey(params, key, requestHash);
       }
       throw error;
     }
 
+    return this.executeAndPersist(row.id, params, row.resourceId);
+  }
+
+  private async executeAndPersist<T>(
+    rowId: string,
+    params: IdempotencyRunParams<T>,
+    resourceId: string | null,
+  ): Promise<T> {
     try {
-      const result = await params.execute();
+      const result = await params.execute(resourceId ?? undefined);
       await this.prisma.idempotencyKey.update({
-        where: { id: row.id },
+        where: { id: rowId },
         data: {
           responseCode: params.responseCode,
           responseBody: result as Prisma.InputJsonValue,
@@ -62,9 +73,43 @@ export class IdempotencyService {
       });
       return result;
     } catch (error) {
-      await this.prisma.idempotencyKey.delete({ where: { id: row.id } });
+      if (!params.retainResource) {
+        await this.prisma.idempotencyKey.delete({ where: { id: rowId } });
+      }
       throw error;
     }
+  }
+
+  private async onExistingKey<T>(
+    params: IdempotencyRunParams<T>,
+    key: string,
+    requestHash: string,
+  ): Promise<T> {
+    const existing = await this.prisma.idempotencyKey.findUnique({
+      where: { partnerId_key: { partnerId: params.partnerId, key } },
+    });
+
+    if (existing) {
+      if (existing.requestHash !== requestHash) {
+        throw new DomainException(
+          1043,
+          'idempotency_conflict',
+          'Idempotency-Key was reused with a different request body.',
+          { key },
+          409,
+        );
+      }
+
+      if (existing.responseCode !== null && existing.responseBody !== null) {
+        return existing.responseBody as T;
+      }
+
+      if (params.retainResource && existing.resourceId) {
+        return this.executeAndPersist(existing.id, params, existing.resourceId);
+      }
+    }
+
+    return this.waitForSnapshot<T>(params.partnerId, key, requestHash);
   }
 
   private readKey(header: string | string[] | undefined): string | null {

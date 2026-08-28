@@ -13,6 +13,7 @@ describe('PaymentsService', () => {
   const prisma = {
     payment: {
       create: jest.fn(),
+      findUnique: jest.fn(),
       findFirst: jest.fn(),
       findMany: jest.fn(),
       count: jest.fn(),
@@ -42,6 +43,7 @@ describe('PaymentsService', () => {
       status: 201,
       json: () =>
         Promise.resolve({
+          id: 'chg_test',
           qr_code: SYNTHETIC_QR,
           copy_paste: SYNTHETIC_QR,
         }),
@@ -64,23 +66,30 @@ describe('PaymentsService', () => {
 
   it('creates a PENDING payment with integer minor units', async () => {
     const expiresAt = new Date(Date.now() + 1800_000);
-    prisma.payment.create.mockResolvedValue({
-      id: 'pay-1',
-      partnerId: partner.id,
-      status: PaymentStatus.PENDING,
-      amount: 1500n,
-      currency: 'BRL',
-      externalId: 'order-1',
-      description: null,
-      qrCode: '00020126',
-      copyPaste: '00020126',
-      provider: 'fake_pix',
-      providerTxId: null,
-      expiresAt,
-      paidAt: null,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
+    prisma.payment.create.mockImplementation(
+      (args: { data: Record<string, unknown> }) => {
+        expect(args.data.providerChargeId).toBe('chg_test');
+        expect(args.data.providerTxId).toBeUndefined();
+        return Promise.resolve({
+          id: 'pay-1',
+          partnerId: partner.id,
+          status: PaymentStatus.PENDING,
+          amount: 1500n,
+          currency: 'BRL',
+          externalId: 'order-1',
+          description: null,
+          qrCode: '00020126',
+          copyPaste: '00020126',
+          provider: 'fake_pix',
+          providerChargeId: 'chg_test',
+          providerTxId: null,
+          expiresAt,
+          paidAt: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        });
+      },
+    );
 
     const result = await service.create(partner, {
       amount: 1500,
@@ -92,7 +101,55 @@ describe('PaymentsService', () => {
     expect(result.amount).toBe(1500);
     expect(typeof result.amount).toBe('number');
     expect(result.qr_code).toBe('00020126');
+    expect(result).not.toHaveProperty('provider_charge_id');
     expect(prisma.payment.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses the provided resourceId as the payment id sent to the provider', async () => {
+    const resourceId = '11111111-1111-4111-8111-111111111111';
+    const expiresAt = new Date(Date.now() + 1800_000);
+    prisma.payment.create.mockImplementation(
+      (args: { data: Record<string, unknown> }) => {
+        expect(args.data.id).toBe(resourceId);
+        expect(args.data.providerChargeId).toBe('chg_test');
+        return Promise.resolve({
+          id: resourceId,
+          partnerId: partner.id,
+          status: PaymentStatus.PENDING,
+          amount: 1500n,
+          currency: 'BRL',
+          externalId: null,
+          description: null,
+          qrCode: SYNTHETIC_QR,
+          copyPaste: SYNTHETIC_QR,
+          provider: 'fake_pix',
+          providerChargeId: 'chg_test',
+          providerTxId: null,
+          expiresAt,
+          paidAt: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        });
+      },
+    );
+
+    const result = await service.create(
+      partner,
+      { amount: 1500, currency: 'BRL' },
+      resourceId,
+    );
+
+    expect(result.id).toBe(resourceId);
+    const [, init] = (globalThis.fetch as jest.Mock).mock.calls[0] as [
+      string,
+      RequestInit,
+    ];
+    const rawBody = init.body;
+    if (typeof rawBody !== 'string') {
+      throw new Error('expected string body');
+    }
+    const body = JSON.parse(rawBody) as { payment_id: string };
+    expect(body.payment_id).toBe(resourceId);
   });
 
   it('lists partner payments with pagination metadata', async () => {

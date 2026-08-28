@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
 
 export type FakePixCharge = {
+  id: string;
   qr_code: string;
   copy_paste: string;
   provider: string;
@@ -54,16 +55,17 @@ export class FakePixProvider {
       this.failGateway();
     }
 
-    if (response.status !== 201) {
+    if (response.status !== 201 && response.status !== 200) {
       this.logger.warn(
         `PIX provider unavailable: HTTP ${response.status} ${await this.bodySnippet(response)}`,
       );
       this.failGateway();
     }
 
-    let payload: { qr_code?: unknown; copy_paste?: unknown };
+    let payload: { id?: unknown; qr_code?: unknown; copy_paste?: unknown };
     try {
       payload = (await response.json()) as {
+        id?: unknown;
         qr_code?: unknown;
         copy_paste?: unknown;
       };
@@ -72,9 +74,12 @@ export class FakePixProvider {
       this.failGateway();
     }
 
+    const id = payload.id;
     const qrCode = payload.qr_code;
     const copyPaste = payload.copy_paste;
     if (
+      typeof id !== 'string' ||
+      id === '' ||
       typeof qrCode !== 'string' ||
       qrCode === '' ||
       typeof copyPaste !== 'string' ||
@@ -85,6 +90,7 @@ export class FakePixProvider {
     }
 
     return {
+      id,
       qr_code: qrCode,
       copy_paste: copyPaste,
       provider: 'fake_pix',

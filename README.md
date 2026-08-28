@@ -96,8 +96,29 @@ curl -s -X POST http://localhost:8080/v1/charges/<charge_id>/simulate \
   -d '{"type":"payment.paid"}'
 ```
 
-If Go is down, `POST /v1/payments` returns **502**. The Next webhook simulator
-remains a parallel path and is not required to prove Go → API.
+If Go is down, `POST /v1/payments` returns **502**. Retry the same
+`Idempotency-Key` after Go is up: the API keeps the key, reuses the same
+payment UUID, Go `CreateOrGet` returns the same charge, and you still get
+`201 PENDING`. Then simulate as above so the webhook marks it `PAID`.
+Without the header, create stays non-idempotent (new UUID). USD is still
+the existing `validation_error` (fase 9). The Next webhook simulator remains
+a parallel path and is not required to prove Go → API.
+
+```bash
+# 1. Go down → 502; key is retained
+curl -s -X POST http://localhost:3001/v1/payments \
+  -H "Authorization: Bearer demo-partner-key" \
+  -H "Idempotency-Key: demo-retry-1" \
+  -H "Content-Type: application/json" \
+  -d '{"amount":1500,"currency":"BRL","external_id":"demo-retry-1"}'
+
+# 2. Start Go, then retry the same key → 201 (same payment id)
+curl -s -X POST http://localhost:3001/v1/payments \
+  -H "Authorization: Bearer demo-partner-key" \
+  -H "Idempotency-Key: demo-retry-1" \
+  -H "Content-Type: application/json" \
+  -d '{"amount":1500,"currency":"BRL","external_id":"demo-retry-1"}'
+```
 
 Read-only wallet vs ledger check:
 

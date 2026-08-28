@@ -42,8 +42,10 @@ export class PaymentsController {
       method: 'POST',
       path: '/v1/payments',
       rawBody: request.rawBody?.toString('utf8') ?? JSON.stringify(dto),
-      execute: () => this.paymentsService.create(partner, dto),
+      execute: (resourceId?: string) =>
+        this.paymentsService.create(partner, dto, resourceId),
       responseCode: 201,
+      retainResource: true,
     });
   }
 
