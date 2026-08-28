@@ -116,6 +116,17 @@ curl -s -X POST http://localhost:3001/v1/payments \
   -d '{"amount":1500,"currency":"BRL","external_id":"demo-retry-1"}'
 ```
 
+Restart the PSP **after create, before simulate** — `GET by-payment` still
+finds the charge (Postgres). Restart **after simulate** before the webhook
+lands — the outbox poller re-sends; the wallet inbox stays unique on
+`(provider, event_id)` so the payment is `PAID` once.
+
+```bash
+docker compose restart fake-pix
+curl -s http://localhost:8080/v1/charges/by-payment/<payment_id> \
+  -H "Authorization: Bearer fake-pix-demo"
+```
+
 Read-only wallet vs ledger check:
 
 ```bash
