@@ -6,12 +6,14 @@ Nest runs on **host Node 20+** or inside the optional `api` Docker service.
 
 ```bash
 cp .env.example .env
-docker compose up -d postgres redis
+docker compose up -d
 npm install
 npx prisma migrate dev --name init
 npm run db:seed
 npm run start:dev
 ```
+
+`docker compose up -d` starts Postgres, Redis, and **fake-pix** (no `go run`).
 
 BullMQ workers run in-process with `@nestjs/bullmq` processors (no separate worker
 command required for the demo).

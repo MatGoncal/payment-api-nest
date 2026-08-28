@@ -62,8 +62,9 @@ jobs:
       - run: npm test
 
       # The integration suite truncates every table, so it gets its own database.
+      # DATABASE_URL carries Prisma's `?schema=public`, which libpq/psql reject.
       - name: Create integration database
-        run: psql "$DATABASE_URL" -c 'CREATE DATABASE acmepay_test'
+        run: psql "postgresql://acmepay:acmepay@localhost:5432/acmepay" -c 'CREATE DATABASE acmepay_test'
 
       - run: npm run test:int
 

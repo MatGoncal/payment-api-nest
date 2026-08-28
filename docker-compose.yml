@@ -45,6 +45,26 @@ services:
       timeout: 3s
       retries: 5
 
+  fake-pix:
+    build:
+      context: ../fake-pix-provider
+      dockerfile: Dockerfile
+    image: fake-pix-provider:local
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    ports:
+      - '8080:8080'
+    environment:
+      PORT: 8080
+      WEBHOOK_SECRET: dev-webhook-secret
+      FAKE_PIX_API_KEY: fake-pix-demo
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:8080/health']
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
   api:
     build: .
     profiles: ['full']
@@ -59,13 +79,15 @@ services:
       REDIS_PORT: 6379
       WEBHOOK_SECRET: dev-webhook-secret
       DEMO_PARTNER_API_KEY: demo-partner-key
-      FAKE_PIX_BASE_URL: http://host.docker.internal:8080
+      FAKE_PIX_BASE_URL: http://fake-pix:8080
       FAKE_PIX_API_KEY: fake-pix-demo
-      FAKE_PIX_CALLBACK_URL: http://localhost:3001/v1/webhooks/payment
+      FAKE_PIX_CALLBACK_URL: http://api:3001/v1/webhooks/payment
     depends_on:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      fake-pix:
         condition: service_healthy
 
 volumes:
