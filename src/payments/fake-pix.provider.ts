@@ -26,7 +26,7 @@ export class FakePixProvider {
     const apiKey = this.config.get<string>('FAKE_PIX_API_KEY', 'fake-pix-demo');
     const callbackUrl = this.config.get<string>(
       'FAKE_PIX_CALLBACK_URL',
-      'http://127.0.0.1:3001/v1/webhooks/payment',
+      'http://host.docker.internal:3001/v1/webhooks/payment',
     );
     const url = `${baseUrl}/v1/charges`;
 

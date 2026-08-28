@@ -36,7 +36,7 @@ flowchart TB
 
 ```bash
 cp .env.example .env
-docker compose up -d postgres redis
+docker compose up -d
 npm install
 npx prisma migrate dev --name init
 npm run db:seed
@@ -47,7 +47,7 @@ npm run start:dev
 - Swagger: `http://localhost:3001/docs`
 - Demo API key: `demo-partner-key`
 - Webhook secret: `dev-webhook-secret`
-- Docker (`--profile full`): `FAKE_PIX_BASE_URL=http://host.docker.internal:8080`, callback `http://localhost:3001/v1/webhooks/payment`. Host Node keeps `.env.example` (`127.0.0.1`).
+- `docker compose up -d` starts postgres, redis, and **fake-pix** (`:8080`). Host Node uses `.env.example` (`127.0.0.1:8080` → published port; callback `host.docker.internal:3001` so the Go container can reach the API). `--profile full` uses `http://fake-pix:8080` and callback `http://api:3001/v1/webhooks/payment`.
 
 ## Laravel vs Nest (portfolio comparison)
 
@@ -65,18 +65,12 @@ Both repos share the same OpenAPI contract, error codes, and integer minor-unit 
 
 ## Demo PIX with fake-pix-provider
 
-QR comes from Go on the **host** (`go run`, `:8080`). Nest reaches it via
-`http://127.0.0.1:8080`. BullMQ processors run in-process with the API, so the
-signed webhook from `simulate` can mark the payment `PAID` without a separate
-worker.
+QR comes from the `fake-pix` container (`docker compose up -d`, published
+`:8080`). Nest on the host reaches it via `http://127.0.0.1:8080`. BullMQ
+processors run in-process with the API, so the signed webhook from `simulate`
+can mark the payment `PAID` without a separate worker.
 
-```bash
-# In portfolio/fake-pix-provider
-export WEBHOOK_SECRET=dev-webhook-secret
-export FAKE_PIX_API_KEY=fake-pix-demo
-export PORT=8080
-go run ./cmd/provider
-```
+No `go run` on the host. Smoke 502 = `docker compose stop fake-pix`.
 
 ```bash
 # Create (copy `id` from the 201)
@@ -105,14 +99,16 @@ the existing `validation_error` (fase 9). The Next webhook simulator remains
 a parallel path and is not required to prove Go → API.
 
 ```bash
-# 1. Go down → 502; key is retained
+# 1. Stop the PSP → 502; key is retained
+docker compose stop fake-pix
 curl -s -X POST http://localhost:3001/v1/payments \
   -H "Authorization: Bearer demo-partner-key" \
   -H "Idempotency-Key: demo-retry-1" \
   -H "Content-Type: application/json" \
   -d '{"amount":1500,"currency":"BRL","external_id":"demo-retry-1"}'
 
-# 2. Start Go, then retry the same key → 201 (same payment id)
+# 2. Start the PSP, then retry the same key → 201 (same payment id)
+docker compose start fake-pix
 curl -s -X POST http://localhost:3001/v1/payments \
   -H "Authorization: Bearer demo-partner-key" \
   -H "Idempotency-Key: demo-retry-1" \
