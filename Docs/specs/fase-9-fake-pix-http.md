@@ -128,6 +128,9 @@ None. Charge id is not stored.
 | `FAKE_PIX_API_KEY` | `fake-pix-demo` | `fake-pix-demo` | Outbound Bearer / `X-Api-Key` |
 | `FAKE_PIX_CALLBACK_URL` | `http://127.0.0.1:3001/v1/webhooks/payment` | `http://localhost:3001/v1/webhooks/payment` | URL the **Go process on the host** can reach (published port) |
 
+Compose URLs once Go is a container (fase 11):
+`Docs/specs/fase-11-fake-pix-compose.md`.
+
 ## Dependências / Rollback
 
 - Dependências: `fake-pix-provider` on the host for local demo; tests mock `fetch`.
