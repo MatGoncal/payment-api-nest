@@ -4,12 +4,15 @@ import {
   ExceptionFilter,
   HttpException,
   HttpStatus,
+  Logger,
 } from '@nestjs/common';
 import { Response } from 'express';
 import { DomainException } from '../exceptions/domain.exception';
 
 @Catch()
 export class GlobalExceptionFilter implements ExceptionFilter {
+  private readonly logger = new Logger(GlobalExceptionFilter.name);
+
   catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
@@ -96,7 +99,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       });
     }
 
-    console.error(exception);
+    this.logger.error(exception);
     return response.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
       error: {
         code: 500,
