@@ -40,9 +40,9 @@ export default tseslint.config(
     rules: {
       // 0 violações (medir 2026-09-04)
       'quality/max-lines': ['error', { max: 400 }],
-      // 2 violações (medir 2026-09-04): cli/run-reconcile.ts, common/filters/domain-exception.filter.ts
+      // 0 violações
       'quality/no-direct-console': [
-        'warn',
+        'error',
         { logger: 'NestJS Logger (@nestjs/common)' },
       ],
       // 0 violações (medir 2026-09-04)
